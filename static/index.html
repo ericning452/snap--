@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>远程截屏控制器 - Snap Demo</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: #f4f6f9;
+            color: #333;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            padding: 30px 20px;
+        }
+        .container {
+            max-width: 960px;
+            width: 100%;
+            background: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            padding: 24px;
+        }
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #edf2f7;
+            padding-bottom: 16px;
+            margin-bottom: 20px;
+        }
+        h1 {
+            font-size: 20px;
+            font-weight: 600;
+            color: #2d3748;
+        }
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            font-size: 13px;
+            font-weight: 500;
+            padding: 4px 10px;
+            border-radius: 20px;
+            background-color: #fed7d7;
+            color: #9b2c2c;
+        }
+        .status-badge.connected {
+            background-color: #c6f6d5;
+            color: #22543d;
+        }
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: currentColor;
+            margin-right: 6px;
+        }
+        .controls {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        button {
+            background-color: #3182ce;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            padding: 10px 20px;
+            font-size: 15px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s, transform 0.1s;
+        }
+        button:hover {
+            background-color: #2b6cb0;
+        }
+        button:active {
+            transform: scale(0.98);
+        }
+        button:disabled {
+            background-color: #a0aec0;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .info-text {
+            font-size: 13px;
+            color: #718096;
+        }
+        .preview-wrapper {
+            position: relative;
+            background-color: #1a202c;
+            border-radius: 8px;
+            min-height: 360px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            border: 1px solid #e2e8f0;
+        }
+        .placeholder-text {
+            color: #718096;
+            font-size: 15px;
+        }
+        #imgBox {
+            max-width: 100%;
+            height: auto;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🖥️ 远程截屏控制器</h1>
+            <div id="statusBadge" class="status-badge">
+                <span class="status-dot"></span>
+                <span id="statusText">连接中...</span>
+            </div>
+        </header>
+
+        <div class="controls">
+            <button id="captureBtn" onclick="sendCapture()" disabled>📸 点击截取屏幕</button>
+            <span id="infoText" class="info-text">等待连接服务器...</span>
+        </div>
+
+        <div class="preview-wrapper">
+            <div id="placeholder" class="placeholder-text">暂无画面，点击上方按钮触发截屏</div>
+            <img id="imgBox" alt="屏幕截图" />
+        </div>
+    </div>
+
+    <script>
+        const statusBadge = document.getElementById("statusBadge");
+        const statusText = document.getElementById("statusText");
+        const captureBtn = document.getElementById("captureBtn");
+        const infoText = document.getElementById("infoText");
+        const imgBox = document.getElementById("imgBox");
+        const placeholder = document.getElementById("placeholder");
+
+        const wsProtocol = location.protocol === "https:" ? "wss:" : "ws:";
+        const wsUrl = `${wsProtocol}//${location.host}/ws`;
+        let ws;
+
+        function connect() {
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = function () {
+                statusBadge.className = "status-badge connected";
+                statusText.innerText = "已连接";
+                captureBtn.disabled = false;
+                infoText.innerText = "就绪，随时可触发截屏";
+            };
+
+            ws.onmessage = function (event) {
+                // jpg base64 前缀通常为 /9j/
+                if (event.data.startsWith("/9j/")) {
+                    imgBox.src = "data:image/jpeg;base64," + event.data;
+                    imgBox.style.display = "block";
+                    placeholder.style.display = "none";
+                    captureBtn.disabled = false;
+                    infoText.innerText = `截图更新于: ${new Date().toLocaleTimeString()}`;
+                }
+            };
+
+            ws.onclose = function () {
+                statusBadge.className = "status-badge";
+                statusText.innerText = "连接断开";
+                captureBtn.disabled = true;
+                infoText.innerText = "与服务器断开连接，3秒后自动尝试重连...";
+                setTimeout(connect, 3000);
+            };
+
+            ws.onerror = function () {
+                ws.close();
+            };
+        }
+
+        function sendCapture() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send("capture");
+                captureBtn.disabled = true;
+                infoText.innerText = "已发送截屏指令，等待回传画面...";
+                // 3秒后如果没收到回复自动解禁按钮
+                setTimeout(() => {
+                    if (captureBtn.disabled) captureBtn.disabled = false;
+                }, 3000);
+            }
+        }
+
+        connect();
+    </script>
+</body>
+</html>
